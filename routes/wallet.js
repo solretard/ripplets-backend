@@ -89,4 +89,39 @@ router.get('/nft/:nftTokenId/metadata', async (req, res) => {
   }
 });
 
+// Simple image proxy — fetches the real image server-side (where the
+// browser's cross-origin restrictions don't apply) and re-serves it from
+// our own domain. Only allows known-safe IPFS gateway hosts, so this can't
+// be abused as an open proxy for arbitrary URLs.
+const ALLOWED_IMAGE_HOSTS = ['ipfs.io', 'gateway.pinata.cloud', 'nftstorage.link', 'dweb.link'];
+
+router.get('/image-proxy', async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).send('Missing url parameter.');
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (e) {
+    return res.status(400).send('Invalid url.');
+  }
+  if (!ALLOWED_IMAGE_HOSTS.includes(parsed.hostname)) {
+    return res.status(403).send('Host not allowed.');
+  }
+
+  try {
+    const upstream = await fetch(parsed.toString());
+    if (!upstream.ok) return res.status(upstream.status).send('Upstream fetch failed.');
+
+    const contentType = upstream.headers.get('content-type') || 'image/png';
+    res.set('Content-Type', contentType);
+    res.set('Cache-Control', 'public, max-age=86400'); // images don't change, cache a day
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    res.send(buffer);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('Failed to proxy image.');
+  }
+});
+
 module.exports = router;
