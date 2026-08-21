@@ -8,7 +8,6 @@ app.use(express.json());
 
 app.use('/api', require('./routes/holdings'));
 app.use('/api', require('./routes/wallet'));
-app.use('/api', require('./routes/claim'));
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

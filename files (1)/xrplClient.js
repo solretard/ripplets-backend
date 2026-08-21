@@ -13,19 +13,14 @@ if (!RPLTS_ISSUER) {
   throw new Error('Set RPLTS_ISSUER_ADDRESS — the wallet address that issues $RPLTS.');
 }
 
-let cachedClient = null;
+let clientPromise = null;
 
 async function getClient() {
-  if (cachedClient && cachedClient.isConnected()) {
-    return cachedClient;
+  if (!clientPromise) {
+    const client = new xrpl.Client(NETWORK);
+    clientPromise = client.connect().then(() => client);
   }
-  // Either no client yet, or the connection dropped (idle timeout, network
-  // blip, etc). xrpl.js doesn't reconnect on its own, so we do it here —
-  // every getClient() call is now safe even after a long idle period.
-  const client = new xrpl.Client(NETWORK);
-  await client.connect();
-  cachedClient = client;
-  return cachedClient;
+  return clientPromise;
 }
 
 function getHotWallet() {
