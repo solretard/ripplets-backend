@@ -4,9 +4,26 @@ const supabase = require('../lib/supabase');
 const xrplClient = require('../lib/xrplClient');
 const { accruedSince, round2 } = require('../lib/rewards');
 
+const CLAIM_LOCK_HOURS = 24;
+
+// Set LAUNCH_TIME in .env the moment you actually launch on First Ledger
+// (ISO timestamp, e.g. 2026-08-25T14:00:00Z). Claims are blocked for the
+// first 24 hours after that, matching your dev/escrow token unlock window.
+// If LAUNCH_TIME isn't set at all, claiming is left unrestricted — this
+// keeps local testing simple pre-launch.
+function getClaimUnlockInfo() {
+  const launchTime = process.env.LAUNCH_TIME;
+  if (!launchTime) {
+    return { claimUnlocked: true, claimUnlocksAt: null };
+  }
+  const unlockAt = new Date(launchTime).getTime() + CLAIM_LOCK_HOURS * 60 * 60 * 1000;
+  const unlocked = Date.now() >= unlockAt;
+  return { claimUnlocked: unlocked, claimUnlocksAt: new Date(unlockAt).toISOString() };
+}
+
 // Read-only check the frontend calls before showing the claim popup —
-// tells it how much is claimable and whether the trustline is already set,
-// so the UI can guide the person accurately instead of guessing.
+// tells it how much is claimable, whether the trustline is already set,
+// and whether the post-launch claim lock has passed yet.
 router.get('/claim/:wallet/check', async (req, res) => {
   const { wallet } = req.params;
 
@@ -27,7 +44,7 @@ router.get('/claim/:wallet/check', async (req, res) => {
     // Unfunded/invalid address — leave as null, frontend can show a neutral state.
   }
 
-  res.json({ totalAccrued, hasTrustline });
+  res.json({ totalAccrued, hasTrustline, ...getClaimUnlockInfo() });
 });
 
 // The actual payout. No signature required — the destination is always
@@ -38,6 +55,14 @@ router.get('/claim/:wallet/check', async (req, res) => {
 router.post('/claim', async (req, res) => {
   const { wallet } = req.body;
   if (!wallet) return res.status(400).json({ error: 'wallet is required.' });
+
+  const unlockInfo = getClaimUnlockInfo();
+  if (!unlockInfo.claimUnlocked) {
+    return res.status(403).json({
+      error: 'Claims open 24 hours after launch — check back soon.',
+      ...unlockInfo,
+    });
+  }
 
   try {
     const { data: holdings, error } = await supabase
